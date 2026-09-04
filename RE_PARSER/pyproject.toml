@@ -1,0 +1,25 @@
+[project]
+name = "service-monitoring-real-estate-parser"
+version = "0.1.0"
+description = "Parser service for real estate monitoring"
+readme = "README.md"
+authors = [
+    { name = "kukluks", email = "rodiongrayholm@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.55.0",
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.15.0",
+    "httpx>=0.28.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["service_monitoring_real_estate_parser"]
+
+[project.scripts]
+service-monitoring-real-estate-parser = "service_monitoring_real_estate_parser:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"

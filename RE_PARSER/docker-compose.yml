@@ -1,0 +1,7 @@
+services:
+  re_parser:
+    build: .
+    container_name: re_parser
+    command: python src/main.py
+    env_file:
+      - .env.dev
