@@ -9,12 +9,16 @@ from src.schemas.property import PropertySchema
 
 class PropertyService:
     def __init__(self) -> None:
-        self.parser = get_parser(settings.PARSER_NAME)
+        self.parser = get_parser()
 
     async def collect_properties(self) -> list[PropertySchema]:
         return await self.parser.parse()
 
     async def send_properties(self, properties: list[PropertySchema]) -> None:
+        if not properties:
+            print("No properties were parsed.")
+            return
+
         if not settings.API_BASE_URL:
             print(
                 json.dumps(
@@ -27,4 +31,7 @@ class PropertyService:
 
         async with httpx.AsyncClient(base_url=str(settings.API_BASE_URL), timeout=30.0) as client:
             for item in properties:
-                await client.post("/properties", json=item.model_dump(mode="json"))
+                response = await client.post("/properties/", json=item.model_dump(mode="json"))
+                response.raise_for_status()
+
+        print(f"Sent {len(properties)} properties to API.")

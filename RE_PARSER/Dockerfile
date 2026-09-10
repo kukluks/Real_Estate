@@ -1,12 +1,13 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/playwright/python:v1.55.0-jammy
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY . .
 
 RUN pip install --no-cache-dir uv \
-    && uv pip install --system . \
-    && python -m playwright install chromium
+    && uv pip install --system .
 
 CMD ["python", "src/main.py"]

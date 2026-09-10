@@ -1,53 +1,95 @@
 # Real_Estate_Parser
 
-Сервис парсинга недвижимости на `playwright` с поддержкой нескольких сайтов.
+Instagram-only сервис парсинга недвижимости на `playwright`.
+
+## Что умеет
+
+- открывать Instagram-профиль или страницу источника
+- при необходимости логиниться через `INSTAGRAM_USERNAME` и `INSTAGRAM_PASSWORD`
+- использовать сохранённую сессию через `INSTAGRAM_SESSION_STATE_PATH`
+- сохранять новую сессию после логина
+- собирать ссылки на посты и reels
+- открывать публикации и вытаскивать данные недвижимости из подписи
+- отправлять результат в API или печатать JSON в stdout
 
 ## Структура
 
-- `src/main.py` — точка входа для запуска парсинга
-- `src/core/config.py` — настройки приложения
-- `src/clients/playwright.py` — управление браузером Playwright
-- `src/parsers/base.py` — базовый интерфейс парсера
-- `src/parsers/registry.py` — реестр парсеров
-- `src/parsers/example.py` — тестовый parser
-- `src/parsers/lalafo.py` — parser для Lalafo
-- `src/services/property.py` — orchestration-слой
-- `src/schemas/property.py` — схема объявления и enum источников
+- `src/main.py` — точка входа
+- `src/core/config.py` — настройки через env
+- `src/clients/playwright.py` — Playwright client
+- `src/parsers/instagram.py` — основная бизнес-логика парсинга Instagram
+- `src/parsers/registry.py` — возврат активного parser
+- `src/services/property.py` — orchestration и отправка в API
+- `src/schemas/property.py` — схема объявления
+- `docker-compose.yml` — автономный запуск parser-сервиса
 
-## Источники
+## Как запускать отдельно
 
-Сейчас поддержаны:
-
-- `example`
-- `lalafo`
-
-Новые сайты удобно добавлять отдельными файлами в `src/parsers/` и регистрировать в `src/parsers/registry.py`.
-
-## Запуск
+Из папки `RE_PARSER`:
 
 ```bash
-uv run python src/main.py
+cp .env.dev.example .env.dev
+docker compose up --build
 ```
 
-## Пример `.env.dev`
+## Обязательные env
 
 ```env
 MODE=dev
-PARSER_NAME=lalafo
-START_URL=https://lalafo.kg/kyrgyzstan/nedvizhimost
+START_URL=https://www.instagram.com/your_account/
 HEADLESS=true
 BROWSER=chromium
 TIMEOUT_MS=30000
 MAX_ITEMS=20
-API_BASE_URL=http://localhost:8000
+INSTAGRAM_SCROLL_COUNT=3
+INSTAGRAM_LOGIN_REQUIRED=false
+INSTAGRAM_USERNAME=
+INSTAGRAM_PASSWORD=
+INSTAGRAM_SESSION_STATE_PATH=/app/.session/instagram.json
+INSTAGRAM_SAVE_SESSION=false
+API_BASE_URL=http://host.docker.internal:8000
 ```
 
-## Установка браузеров Playwright
+## Сценарии
 
-```bash
-uv run playwright install
+### Публичный аккаунт
+
+```env
+START_URL=https://www.instagram.com/your_account/
+INSTAGRAM_LOGIN_REQUIRED=false
 ```
 
-## Примечание
+### Логин по учётке
 
-У Lalafo, как и у других маркетплейсов, вёрстка может меняться. Текущий `src/parsers/lalafo.py` — это хорошая стартовая база, но селекторы, возможно, придётся подправить под реальную страницу выдачи.
+```env
+START_URL=https://www.instagram.com/your_account/
+INSTAGRAM_LOGIN_REQUIRED=true
+INSTAGRAM_USERNAME=your_login
+INSTAGRAM_PASSWORD=your_password
+INSTAGRAM_SAVE_SESSION=true
+INSTAGRAM_SESSION_STATE_PATH=/app/.session/instagram.json
+```
+
+После первого успешного логина сессия сохранится в `RE_PARSER/.session/instagram.json`.
+
+### Запуск с сохранённой сессией
+
+```env
+START_URL=https://www.instagram.com/your_account/
+INSTAGRAM_LOGIN_REQUIRED=true
+INSTAGRAM_SESSION_STATE_PATH=/app/.session/instagram.json
+```
+
+## Связь с API
+
+Если `RE_API2` запущен отдельно через свой `docker compose` и публикует порт `8000`, то из parser-контейнера используй:
+
+```env
+API_BASE_URL=http://host.docker.internal:8000
+```
+
+Для этого в `docker-compose.yml` parser уже добавлен `extra_hosts` с `host-gateway`.
+
+## Ограничения
+
+Instagram может менять DOM, требовать логин, показывать дополнительные модалки и ограничивать automation. Поэтому сервис подготовлен к отдельному запуску, но для конкретного аккаунта-источника может понадобиться дополнительная настройка селекторов и логики извлечения текста.

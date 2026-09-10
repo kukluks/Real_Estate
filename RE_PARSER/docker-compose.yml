@@ -1,7 +1,14 @@
 services:
   re_parser:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: re_parser
-    command: python src/main.py
+    restart: unless-stopped
     env_file:
       - .env.dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./.session:/app/.session
+    command: ["python", "src/main.py"]

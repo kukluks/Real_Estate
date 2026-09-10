@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Self
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
@@ -16,7 +17,13 @@ class PlaywrightClient:
         browser_launcher = getattr(self._playwright, settings.BROWSER)
         browser = await browser_launcher.launch(headless=settings.HEADLESS)
         self._browser = browser
-        self._context = await browser.new_context()
+
+        storage_state = settings.INSTAGRAM_SESSION_STATE_PATH
+        if storage_state:
+            self._context = await browser.new_context(storage_state=str(Path(storage_state)))
+        else:
+            self._context = await browser.new_context()
+
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -34,3 +41,9 @@ class PlaywrightClient:
         page = await self._context.new_page()
         page.set_default_timeout(settings.TIMEOUT_MS)
         return page
+
+    async def save_storage_state(self, path: str) -> None:
+        if self._context is None:
+            raise RuntimeError("Playwright context is not initialized.")
+
+        await self._context.storage_state(path=path)

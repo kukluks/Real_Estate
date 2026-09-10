@@ -4,8 +4,7 @@ from pydantic import BaseModel, HttpUrl
 
 
 class PropertySource(StrEnum):
-    EXAMPLE = "example"
-    LALAFO = "lalafo"
+    INSTAGRAM = "instagram"
 
 
 class PropertySchema(BaseModel):
@@ -13,6 +12,8 @@ class PropertySchema(BaseModel):
     description: str = ""
     price: float | None = None
     url: HttpUrl
-    source: PropertySource
-    city: str
-    property_type: str
+    source: PropertySource = PropertySource.INSTAGRAM
+    city: str = "unknown"
+    property_type: str = "unknown"
+    external_id: str | None = None
+    contact: str | None = None
