@@ -6,7 +6,7 @@ API сервис для хранения объявлений недвижимо
 
 - принимает объявления через `POST /properties/`
 - возвращает список объявлений через `GET /properties/`
-- автоматически создаёт таблицы в базе при старте
+- автоматически накатывает Alembic миграции при старте контейнера
 - поднимается отдельно через свой `docker-compose.yml`
 
 ## Как запускать
@@ -15,8 +15,18 @@ API сервис для хранения объявлений недвижимо
 
 ```bash
 cp .env.dev.example .env.dev
-docker compose up --build
+docker compose --env-file .env.dev up --build
 ```
+
+## Как запускается контейнер
+
+При старте `api` контейнера выполняется команда:
+
+```sh
+uv run alembic upgrade head && uv run python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+То есть миграции накатываются автоматически перед запуском API.
 
 ## Обязательные env
 
@@ -44,22 +54,6 @@ GET /health
 ```http
 POST /properties/
 Content-Type: application/json
-```
-
-Пример тела:
-
-```json
-{
-  "title": "3-комнатная квартира в Бишкеке",
-  "description": "Отличная квартира рядом с центром",
-  "price": 125000,
-  "url": "https://www.instagram.com/p/ABC123/",
-  "source": "instagram",
-  "city": "бишкек",
-  "property_type": "apartment",
-  "external_id": "ABC123",
-  "contact": "+996555123456"
-}
 ```
 
 ### Получить объявления
