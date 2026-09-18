@@ -4,7 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: re_parser
-    restart: unless-stopped
+    restart: "no"
+    stdin_open: true
+    tty: true
     env_file:
       - .env.dev
     extra_hosts:

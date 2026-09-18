@@ -4,39 +4,49 @@ Instagram-only сервис парсинга недвижимости на `play
 
 ## Что умеет
 
-- открывать Instagram-профиль или страницу источника
-- при необходимости логиниться через `INSTAGRAM_USERNAME` и `INSTAGRAM_PASSWORD`
-- использовать сохранённую сессию через `INSTAGRAM_SESSION_STATE_PATH`
-- сохранять новую сессию после логина
-- собирать ссылки на посты и reels
-- открывать публикации и вытаскивать данные недвижимости из подписи
-- отправлять результат в API или печатать JSON в stdout
+- при запуске спрашивает имя Instagram-профиля в консоли
+- открывает указанный профиль через `Playwright`
+- при необходимости логинится через `INSTAGRAM_USERNAME` и `INSTAGRAM_PASSWORD`
+- использует или сохраняет сессию через `INSTAGRAM_SESSION_STATE_PATH`
+- собирает ссылки на посты и reels
+- открывает публикации и кладёт посты в API/БД
+- если API не указан — печатает JSON в stdout
 
-## Структура
-
-- `src/main.py` — точка входа
-- `src/core/config.py` — настройки через env
-- `src/clients/playwright.py` — Playwright client
-- `src/parsers/instagram.py` — основная бизнес-логика парсинга Instagram
-- `src/parsers/registry.py` — возврат активного parser
-- `src/services/property.py` — orchestration и отправка в API
-- `src/schemas/property.py` — схема объявления
-- `docker-compose.yml` — автономный запуск parser-сервиса
-
-## Как запускать отдельно
+## Как запускать
 
 Из папки `RE_PARSER`:
 
 ```bash
 cp .env.dev.example .env.dev
-docker compose up --build
+docker compose build
+
+docker compose run --rm re_parser
+```
+
+Для интерактивного режима лучше использовать именно `docker compose run --rm re_parser`, а не `docker compose up`, потому что ввод через `stdin` у `run` работает стабильнее.
+
+После старта контейнер спросит:
+
+```text
+Enter Instagram profile:
+```
+
+Ты вводишь, например:
+
+```text
+agency_bishkek
+```
+
+И parser пойдёт в:
+
+```text
+https://www.instagram.com/agency_bishkek/
 ```
 
 ## Обязательные env
 
 ```env
 MODE=dev
-START_URL=https://www.instagram.com/your_account/
 HEADLESS=true
 BROWSER=chromium
 TIMEOUT_MS=30000
@@ -50,19 +60,27 @@ INSTAGRAM_SAVE_SESSION=false
 API_BASE_URL=http://host.docker.internal:8000
 ```
 
-## Сценарии
+## Что попадёт в БД
 
-### Публичный аккаунт
+Сейчас parser просто складывает сырые посты в БД через API. Для каждого поста он пытается сохранить:
+
+- `title`
+- `description`
+- `price`
+- `url`
+- `source`
+- `city`
+- `property_type`
+- `external_id`
+- `contact`
+
+Потом на этот слой можно будет отдельно навесить ИИ-анализ.
+
+## Логин-сценарий
+
+Если нужен логин:
 
 ```env
-START_URL=https://www.instagram.com/your_account/
-INSTAGRAM_LOGIN_REQUIRED=false
-```
-
-### Логин по учётке
-
-```env
-START_URL=https://www.instagram.com/your_account/
 INSTAGRAM_LOGIN_REQUIRED=true
 INSTAGRAM_USERNAME=your_login
 INSTAGRAM_PASSWORD=your_password
@@ -72,24 +90,28 @@ INSTAGRAM_SESSION_STATE_PATH=/app/.session/instagram.json
 
 После первого успешного логина сессия сохранится в `RE_PARSER/.session/instagram.json`.
 
-### Запуск с сохранённой сессией
-
-```env
-START_URL=https://www.instagram.com/your_account/
-INSTAGRAM_LOGIN_REQUIRED=true
-INSTAGRAM_SESSION_STATE_PATH=/app/.session/instagram.json
-```
-
 ## Связь с API
 
-Если `RE_API2` запущен отдельно через свой `docker compose` и публикует порт `8000`, то из parser-контейнера используй:
+Если `RE_API2` запущен отдельно через свой `docker compose` и публикует порт `8000`, укажи:
 
 ```env
 API_BASE_URL=http://host.docker.internal:8000
 ```
 
-Для этого в `docker-compose.yml` parser уже добавлен `extra_hosts` с `host-gateway`.
+## Что увидишь в логах
 
-## Ограничения
+При успешном запуске будут сообщения примерно такого вида:
 
-Instagram может менять DOM, требовать логин, показывать дополнительные модалки и ограничивать automation. Поэтому сервис подготовлен к отдельному запуску, но для конкретного аккаунта-источника может понадобиться дополнительная настройка селекторов и логики извлечения текста.
+```text
+Enter Instagram profile: agency_bishkek
+Opening Instagram profile: agency_bishkek
+Found 12 posts/reels on profile agency_bishkek.
+Parsed 8 posts from profile agency_bishkek.
+Sent 8 posts to API.
+```
+
+Если ничего не нашлось:
+
+```text
+No posts were parsed.
+```

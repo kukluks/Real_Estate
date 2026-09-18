@@ -11,12 +11,12 @@ class PropertyService:
     def __init__(self) -> None:
         self.parser = get_parser()
 
-    async def collect_properties(self) -> list[PropertySchema]:
-        return await self.parser.parse()
+    async def collect_properties(self, profile_username: str) -> list[PropertySchema]:
+        return await self.parser.parse(profile_username)
 
     async def send_properties(self, properties: list[PropertySchema]) -> None:
         if not properties:
-            print("No properties were parsed.")
+            print("No posts were parsed.")
             return
 
         if not settings.API_BASE_URL:
@@ -34,4 +34,4 @@ class PropertyService:
                 response = await client.post("/properties/", json=item.model_dump(mode="json"))
                 response.raise_for_status()
 
-        print(f"Sent {len(properties)} properties to API.")
+        print(f"Sent {len(properties)} posts to API.")

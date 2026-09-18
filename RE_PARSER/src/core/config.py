@@ -1,14 +1,13 @@
 import os
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     MODE: Literal["dev", "test"] = "dev"
 
-    START_URL: AnyHttpUrl
     HEADLESS: bool = True
     BROWSER: Literal["chromium", "firefox", "webkit"] = "chromium"
     TIMEOUT_MS: int = 30_000
@@ -29,6 +28,23 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_empty_values(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        for key in [
+            "API_BASE_URL",
+            "INSTAGRAM_USERNAME",
+            "INSTAGRAM_PASSWORD",
+            "INSTAGRAM_SESSION_STATE_PATH",
+        ]:
+            if data.get(key) == "":
+                data[key] = None
+
+        return data
 
 
 settings = Settings()  # type: ignore[call-arg]

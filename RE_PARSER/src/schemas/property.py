@@ -1,9 +1,9 @@
-from enum import StrEnum
+from enum import Enum
 
 from pydantic import BaseModel, HttpUrl
 
 
-class PropertySource(StrEnum):
+class PropertySource(str, Enum):
     INSTAGRAM = "instagram"
 
 

@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Self
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
@@ -12,7 +11,7 @@ class PlaywrightClient:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self) -> "PlaywrightClient":
         self._playwright = await async_playwright().start()
         browser_launcher = getattr(self._playwright, settings.BROWSER)
         browser = await browser_launcher.launch(headless=settings.HEADLESS)

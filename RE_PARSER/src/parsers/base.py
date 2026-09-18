@@ -10,5 +10,5 @@ class BasePropertyParser(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def parse(self) -> list[PropertySchema]:
+    async def parse(self, profile_username: str) -> list[PropertySchema]:
         raise NotImplementedError

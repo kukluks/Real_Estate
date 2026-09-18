@@ -17,30 +17,35 @@ class InstagramPropertyParser(BasePropertyParser):
     def source_name(self) -> str:
         return PropertySource.INSTAGRAM.value
 
-    async def parse(self) -> list[PropertySchema]:
+    async def parse(self, profile_username: str) -> list[PropertySchema]:
         self._validate_settings()
+        profile_url = self._build_profile_url(profile_username)
+
+        print(f"Opening Instagram profile: {profile_username}")
 
         async with PlaywrightClient() as client:
             page = await client.new_page()
-            await page.goto(str(settings.START_URL), wait_until="domcontentloaded")
+            await page.goto(profile_url, wait_until="domcontentloaded")
             await self._dismiss_dialogs(page)
             await self._login_if_needed(page)
 
             if settings.INSTAGRAM_SAVE_SESSION and settings.INSTAGRAM_SESSION_STATE_PATH:
                 await self._save_session_state(client)
 
-            await page.goto(str(settings.START_URL), wait_until="domcontentloaded")
+            await page.goto(profile_url, wait_until="domcontentloaded")
             await self._dismiss_dialogs(page)
             await self._scroll_feed(page)
 
             post_links = await self._collect_post_links(page)
-            properties: list[PropertySchema] = []
+            print(f"Found {len(post_links)} posts/reels on profile {profile_username}.")
 
+            properties: list[PropertySchema] = []
             for post_url in post_links[: settings.MAX_ITEMS]:
                 property_item = await self._parse_post(client, post_url)
                 if property_item is not None:
                     properties.append(property_item)
 
+            print(f"Parsed {len(properties)} posts from profile {profile_username}.")
             return properties
 
     def _validate_settings(self) -> None:
@@ -53,12 +58,20 @@ class InstagramPropertyParser(BasePropertyParser):
                     "or provide INSTAGRAM_SESSION_STATE_PATH."
                 )
 
+    def _build_profile_url(self, profile_username: str) -> str:
+        normalized_username = profile_username.strip().lstrip("@").strip("/")
+        if not normalized_username:
+            raise ValueError("Instagram profile username cannot be empty.")
+        return f"https://www.instagram.com/{normalized_username}/"
+
     async def _login_if_needed(self, page: Page) -> None:
         if await self._is_logged_in(page):
             return
 
         if not settings.INSTAGRAM_USERNAME or not settings.INSTAGRAM_PASSWORD:
             return
+
+        print("Trying to log into Instagram...")
 
         if "accounts/login" not in page.url:
             await page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded")
@@ -77,6 +90,7 @@ class InstagramPropertyParser(BasePropertyParser):
         session_path = Path(settings.INSTAGRAM_SESSION_STATE_PATH or "")
         session_path.parent.mkdir(parents=True, exist_ok=True)
         await client.save_storage_state(str(session_path))
+        print(f"Saved Instagram session to {session_path}.")
 
     async def _is_logged_in(self, page: Page) -> bool:
         selectors = [
@@ -194,7 +208,7 @@ class InstagramPropertyParser(BasePropertyParser):
         first_line = caption.splitlines()[0].strip()
         if first_line:
             return first_line[:200]
-        return "Instagram property"
+        return "Instagram post"
 
     def _extract_price(self, value: str) -> float | None:
         matches = re.findall(r"(?:\$|€|сом|kgs|usd)?\s*\d[\d\s,.]{2,}", value, re.IGNORECASE)
