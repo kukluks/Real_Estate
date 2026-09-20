@@ -1,7 +1,7 @@
 import os
 from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +13,11 @@ class Settings(BaseSettings):
     TIMEOUT_MS: int = 30_000
     MAX_ITEMS: int = 20
 
-    API_BASE_URL: AnyHttpUrl | None = None
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str
+    POSTGRES_HOST: str
+    POSTGRES_PORT: int
 
     INSTAGRAM_USERNAME: str | None = None
     INSTAGRAM_PASSWORD: str | None = None
@@ -36,7 +40,6 @@ class Settings(BaseSettings):
             return data
 
         for key in [
-            "API_BASE_URL",
             "INSTAGRAM_USERNAME",
             "INSTAGRAM_PASSWORD",
             "INSTAGRAM_SESSION_STATE_PATH",
@@ -45,6 +48,13 @@ class Settings(BaseSettings):
                 data[key] = None
 
         return data
+
+    @property
+    def db_url(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
 
 
 settings = Settings()  # type: ignore[call-arg]

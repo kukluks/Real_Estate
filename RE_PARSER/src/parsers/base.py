@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from src.schemas.property import PropertySchema
+from src.schemas.raw_post import RawPostAddSchema
 
 
 class BasePropertyParser(ABC):
@@ -10,5 +10,5 @@ class BasePropertyParser(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def parse(self, profile_username: str) -> list[PropertySchema]:
+    async def parse(self, profile_username: str) -> list[RawPostAddSchema]:
         raise NotImplementedError

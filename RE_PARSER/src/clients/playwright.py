@@ -18,8 +18,9 @@ class PlaywrightClient:
         self._browser = browser
 
         storage_state = settings.INSTAGRAM_SESSION_STATE_PATH
-        if storage_state:
-            self._context = await browser.new_context(storage_state=str(Path(storage_state)))
+        storage_state_path = Path(storage_state) if storage_state else None
+        if storage_state_path is not None and storage_state_path.exists():
+            self._context = await browser.new_context(storage_state=str(storage_state_path))
         else:
             self._context = await browser.new_context()
 

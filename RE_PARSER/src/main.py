@@ -1,6 +1,9 @@
 import asyncio
 import sys
 
+from src.db.base import Base
+from src.db.models.raw_post import RawPostModel  # noqa: F401
+from src.db.session import async_session_maker, engine
 from src.services.property import PropertyService
 
 
@@ -13,10 +16,14 @@ def ask_profile_username() -> str:
 
 
 async def main() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     profile_username = ask_profile_username()
-    service = PropertyService()
-    properties = await service.collect_properties(profile_username)
-    await service.send_properties(properties)
+    async with async_session_maker() as session:
+        service = PropertyService(session)
+        properties = await service.collect_properties(profile_username)
+        await service.save_properties(properties)
 
 
 if __name__ == "__main__":

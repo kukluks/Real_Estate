@@ -9,7 +9,8 @@ from playwright.async_api import Locator, Page
 from src.clients.playwright import PlaywrightClient
 from src.core.config import settings
 from src.parsers.base import BasePropertyParser
-from src.schemas.property import PropertySchema, PropertySource
+from src.schemas.property import PropertySource
+from src.schemas.raw_post import RawPostAddSchema
 
 
 class InstagramPropertyParser(BasePropertyParser):
@@ -17,7 +18,7 @@ class InstagramPropertyParser(BasePropertyParser):
     def source_name(self) -> str:
         return PropertySource.INSTAGRAM.value
 
-    async def parse(self, profile_username: str) -> list[PropertySchema]:
+    async def parse(self, profile_username: str) -> list[RawPostAddSchema]:
         self._validate_settings()
         profile_url = self._build_profile_url(profile_username)
 
@@ -39,14 +40,14 @@ class InstagramPropertyParser(BasePropertyParser):
             post_links = await self._collect_post_links(page)
             print(f"Found {len(post_links)} posts/reels on profile {profile_username}.")
 
-            properties: list[PropertySchema] = []
+            raw_posts: list[RawPostAddSchema] = []
             for post_url in post_links[: settings.MAX_ITEMS]:
-                property_item = await self._parse_post(client, post_url)
-                if property_item is not None:
-                    properties.append(property_item)
+                raw_post = await self._parse_post(client, profile_username, post_url)
+                if raw_post is not None:
+                    raw_posts.append(raw_post)
 
-            print(f"Parsed {len(properties)} posts from profile {profile_username}.")
-            return properties
+            print(f"Parsed {len(raw_posts)} posts from profile {profile_username}.")
+            return raw_posts
 
     def _validate_settings(self) -> None:
         if settings.INSTAGRAM_LOGIN_REQUIRED:
@@ -146,33 +147,30 @@ class InstagramPropertyParser(BasePropertyParser):
 
         return links
 
-    async def _parse_post(self, client: PlaywrightClient, post_url: str) -> PropertySchema | None:
+    async def _parse_post(
+        self, client: PlaywrightClient, profile_username: str, post_url: str
+    ) -> RawPostAddSchema | None:
         page = await client.new_page()
         try:
             await page.goto(post_url, wait_until="domcontentloaded")
             await self._dismiss_dialogs(page)
 
-            caption = await self._extract_caption(page)
-            if not caption:
+            external_id = self._extract_external_id(post_url)
+            if not external_id:
                 return None
 
-            title = self._extract_title(caption)
-            price = self._extract_price(caption)
-            city = self._extract_city(caption)
-            property_type = self._extract_property_type(caption)
-            contact = self._extract_contact(caption)
-            external_id = self._extract_external_id(post_url)
+            caption = await self._extract_caption(page)
 
-            return PropertySchema(
-                title=title,
-                description=caption,
-                price=price,
-                url=HttpUrl(post_url),
-                source=PropertySource.INSTAGRAM,
-                city=city,
-                property_type=property_type,
+            return RawPostAddSchema(
+                source=PropertySource.INSTAGRAM.value,
+                profile_username=profile_username,
                 external_id=external_id,
-                contact=contact,
+                post_url=HttpUrl(post_url),
+                raw_caption=caption,
+                media_urls=None,
+                thumbnail_url=None,
+                published_at=None,
+                ai_status="new",
             )
         finally:
             await page.close()
@@ -203,53 +201,6 @@ class InstagramPropertyParser(BasePropertyParser):
             return text or None
         except PlaywrightError:
             return None
-
-    def _extract_title(self, caption: str) -> str:
-        first_line = caption.splitlines()[0].strip()
-        if first_line:
-            return first_line[:200]
-        return "Instagram post"
-
-    def _extract_price(self, value: str) -> float | None:
-        matches = re.findall(r"(?:\$|€|сом|kgs|usd)?\s*\d[\d\s,.]{2,}", value, re.IGNORECASE)
-        if not matches:
-            return None
-        normalized = re.sub(r"[^\d,.]", "", matches[0]).replace(" ", "").replace(",", ".")
-        try:
-            return float(normalized)
-        except ValueError:
-            return None
-
-    def _extract_city(self, caption: str) -> str:
-        cities = ["бишкек", "ош", "джалал-абад", "каракол", "иссык-куль", "jalal-abad"]
-        normalized = caption.lower()
-        for city in cities:
-            if city in normalized:
-                return city
-        return "unknown"
-
-    def _extract_property_type(self, caption: str) -> str:
-        normalized = caption.lower()
-        if "квартира" in normalized:
-            return "apartment"
-        if "дом" in normalized:
-            return "house"
-        if "участ" in normalized:
-            return "land"
-        if "офис" in normalized or "помещение" in normalized:
-            return "commercial"
-        return "unknown"
-
-    def _extract_contact(self, caption: str) -> str | None:
-        phone_match = re.search(r"(?:\+?996|0)\s*\(?\d{3}\)?[\s-]*\d{2}[\s-]*\d{2}[\s-]*\d{2}", caption)
-        if phone_match:
-            return phone_match.group(0)
-
-        username_match = re.search(r"@[A-Za-z0-9._]+", caption)
-        if username_match:
-            return username_match.group(0)
-
-        return None
 
     def _extract_external_id(self, post_url: str) -> str | None:
         match = re.search(r"/(?:p|reel)/([^/]+)/?", post_url)

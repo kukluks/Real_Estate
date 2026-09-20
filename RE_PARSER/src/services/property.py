@@ -1,37 +1,26 @@
 import json
 
-import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import settings
 from src.parsers.registry import get_parser
-from src.schemas.property import PropertySchema
+from src.schemas.raw_post import RawPostAddSchema
+from src.services.raw_post import RawPostService
 
 
 class PropertyService:
-    def __init__(self) -> None:
+    def __init__(self, db_session: AsyncSession) -> None:
+        self.db_session = db_session
         self.parser = get_parser()
+        self.raw_post_service = RawPostService(db_session)
 
-    async def collect_properties(self, profile_username: str) -> list[PropertySchema]:
+    async def collect_properties(self, profile_username: str) -> list[RawPostAddSchema]:
         return await self.parser.parse(profile_username)
 
-    async def send_properties(self, properties: list[PropertySchema]) -> None:
-        if not properties:
+    async def save_properties(self, raw_posts: list[RawPostAddSchema]) -> None:
+        if not raw_posts:
             print("No posts were parsed.")
             return
 
-        if not settings.API_BASE_URL:
-            print(
-                json.dumps(
-                    [item.model_dump(mode="json") for item in properties],
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
-            return
-
-        async with httpx.AsyncClient(base_url=str(settings.API_BASE_URL), timeout=30.0) as client:
-            for item in properties:
-                response = await client.post("/properties/", json=item.model_dump(mode="json"))
-                response.raise_for_status()
-
-        print(f"Sent {len(properties)} posts to API.")
+        saved_count = await self.raw_post_service.save_raw_posts(raw_posts)
+        print(f"Saved {saved_count} raw posts to parser database.")
+        print(json.dumps([item.model_dump(mode='json') for item in raw_posts], ensure_ascii=False, indent=2))
