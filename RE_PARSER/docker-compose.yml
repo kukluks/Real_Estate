@@ -49,6 +49,7 @@ services:
         condition: service_healthy
     volumes:
       - ./.session:/app/.session
+      - ./storage:/app/storage
     command: ["python", "src/main.py"]
 
 volumes:
