@@ -1,6 +1,7 @@
 import asyncio
 import sys
 
+from src.core.config import settings
 from src.db.base import Base
 from src.db.models.raw_post import RawPostModel  # noqa: F401
 from src.db.models.source import SourceModel  # noqa: F401
@@ -11,9 +12,9 @@ from src.services.source import SourceService
 
 
 def ask_action() -> str:
-    print("Choose action: [1] add source, [2] run parser, [3] show raw posts", end=" ", flush=True)
+    print("Choose action: [1] add source, [2] run parser once, [3] show raw posts, [4] monitor (loop)", end=" ", flush=True)
     action = sys.stdin.readline().strip()
-    if action not in {"1", "2", "3"}:
+    if action not in {"1", "2", "3", "4"}:
         raise ValueError("Invalid action.")
     return action
 
@@ -50,6 +51,17 @@ async def main() -> None:
 
         if action == "3":
             await service.dump_raw_posts()
+            return
+
+        if action == "4":
+            print(f"Starting monitor mode. Interval: {settings.MONITOR_INTERVAL_SECONDS}s. Press Ctrl+C to stop.")
+            try:
+                while True:
+                    await service.process_sources()
+                    print(f"Sleeping for {settings.MONITOR_INTERVAL_SECONDS}s...")
+                    await asyncio.sleep(settings.MONITOR_INTERVAL_SECONDS)
+            except KeyboardInterrupt:
+                print("\nMonitor stopped.")
             return
 
 

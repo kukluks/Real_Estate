@@ -32,7 +32,8 @@ services:
       HEADLESS: "true"
       BROWSER: chromium
       TIMEOUT_MS: "30000"
-      MAX_ITEMS: "20"
+      SAFETY_MAX_ITEMS: "100"
+      MONITOR_INTERVAL_SECONDS: "300"
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: re_parser

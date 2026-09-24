@@ -19,7 +19,7 @@ Parser работает по варианту `A`: через таблицу и�
 При запуске контейнера parser спрашивает действие:
 
 ```text
-Choose action: [1] add source, [2] run parser, [3] show raw posts
+Choose action: [1] add source, [2] run parser once, [3] show raw posts, [4] monitor (loop)
 ```
 
 ### 1. Добавить источник
@@ -36,7 +36,7 @@ Choose action: [1] add source, [2] run parser, [3] show raw posts
 Enter Instagram profile: kvartira_osh98
 ```
 
-### 2. Запустить parser
+### 2. Запустить parser (один раз)
 
 Выбираешь:
 
@@ -44,7 +44,7 @@ Enter Instagram profile: kvartira_osh98
 2
 ```
 
-Тогда parser пройдёт по всем активным источникам из БД.
+Тогда parser пройдёт по всем активным источникам из БД и соберёт новые посты (инкрементально, используя `last_checked_at`).
 
 ### 3. Посмотреть сохранённые raw posts
 
@@ -53,6 +53,23 @@ Enter Instagram profile: kvartira_osh98
 ```text
 3
 ```
+
+### 4. Режим мониторинга (бесконечный цикл)
+
+Выбираешь:
+
+```text
+4
+```
+
+Parser будет каждые `MONITOR_INTERVAL_SECONDS` (по умолчанию 300с) обходить активные источники и сохранять новые посты. Остановка — `Ctrl+C`.
+
+## Инкрементальный сбор
+
+- Парсер использует `source.last_checked_at` как точку отсчёта (`since`).
+- При скролле ленты останавливается, когда встречает пост старше `since`.
+- Дедупликация по `external_id` (unique constraint в БД) — повторные запуски безопасны.
+- Жёсткий лимит безопасности: `SAFETY_MAX_ITEMS` (по умолчанию 100) на один проход.
 
 ## Что хранится в БД parser
 

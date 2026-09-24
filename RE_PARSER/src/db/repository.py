@@ -27,7 +27,7 @@ class RawPostRepository:
             )
             existing_post.thumbnail_path = raw_post_data.thumbnail_path
             existing_post.published_at = raw_post_data.published_at
-            existing_post.ai_status = raw_post_data.ai_status
+            # ai_status намеренно НЕ трогаем: иначе уже обработанный ИИ пост снова станет "new"
 
             await self.db_session.commit()
             await self.db_session.refresh(existing_post)
@@ -56,6 +56,12 @@ class RawPostRepository:
         query = select(RawPostModel).where(RawPostModel.external_id == external_id)
         result = await self.db_session.execute(query)
         return result.scalar_one_or_none()
+
+    async def get_external_ids_by_profile(self, profile_username: str) -> set[str]:
+        """Shortcode'ы всех уже сохранённых постов профиля — чтобы парсер не открывал их повторно."""
+        query = select(RawPostModel.external_id).where(RawPostModel.profile_username == profile_username)
+        result = await self.db_session.execute(query)
+        return set(result.scalars().all())
 
     async def get_raw_posts(self) -> list[RawPostModel]:
         query = select(RawPostModel).order_by(RawPostModel.id.desc())

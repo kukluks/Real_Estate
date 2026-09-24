@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from src.schemas.raw_post import RawPostAddSchema
 
@@ -10,5 +11,5 @@ class BasePropertyParser(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def parse(self, profile_username: str) -> list[RawPostAddSchema]:
+    async def parse(self, profile_username: str, since: datetime | None = None) -> list[RawPostAddSchema]:
         raise NotImplementedError

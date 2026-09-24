@@ -11,7 +11,8 @@ class Settings(BaseSettings):
     HEADLESS: bool = True
     BROWSER: Literal["chromium", "firefox", "webkit"] = "chromium"
     TIMEOUT_MS: int = 30_000
-    MAX_ITEMS: int = 20
+    SAFETY_MAX_ITEMS: int = 100
+    MONITOR_INTERVAL_SECONDS: int = 300
 
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     INSTAGRAM_SCROLL_COUNT: int = 3
     INSTAGRAM_LOGIN_REQUIRED: bool = False
     INSTAGRAM_SAVE_SESSION: bool = False
+    MONITOR_INTERVAL_SECONDS: int = 300
 
     model_config = SettingsConfigDict(
         env_file=f".env.{os.getenv('MODE', 'dev')}",
