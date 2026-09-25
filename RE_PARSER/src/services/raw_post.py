@@ -19,5 +19,8 @@ class RawPostService:
             saved_count += 1
         return saved_count
 
+    async def get_known_external_ids(self, profile_username: str) -> set[str]:
+        return await self.repository.get_external_ids_by_profile(profile_username)
+
     async def get_raw_posts(self):
         return await self.repository.get_raw_posts()

@@ -1,5 +1,4 @@
 import json
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,8 +15,15 @@ class PropertyService:
         self.raw_post_service = RawPostService(db_session)
         self.source_service = SourceService(db_session)
 
-    async def collect_properties(self, profile_username: str, since: datetime | None = None) -> list[RawPostAddSchema]:
-        return await self.parser.parse(profile_username, since)
+    async def collect_properties(self, profile_username: str) -> list[RawPostAddSchema]:
+        # known_ids вместо since: парсер не открывает страницы уже сохранённых постов вообще
+        known_ids = await self.raw_post_service.get_known_external_ids(profile_username)
+        return await self.parser.parse(profile_username, known_external_ids=known_ids)
+
+    async def parse_one(self, profile_username: str) -> int:
+        """Разовый парсинг по запросу — используется эндпоинтом POST /parse."""
+        raw_posts = await self.collect_properties(profile_username)
+        return await self.raw_post_service.save_raw_posts(raw_posts)
 
     async def process_sources(self) -> None:
         sources = await self.source_service.get_active_sources()
@@ -28,8 +34,14 @@ class PropertyService:
         total_saved = 0
         for source in sources:
             print(f"Processing source: {source.profile_username}")
-            raw_posts = await self.collect_properties(source.profile_username, source.last_checked_at)
-            saved_count = await self.raw_post_service.save_raw_posts(raw_posts)
+            try:
+                raw_posts = await self.collect_properties(source.profile_username)
+                saved_count = await self.raw_post_service.save_raw_posts(raw_posts)
+            except Exception as e:
+                # Один упавший источник (login wall, бан, таймаут) не должен ронять весь цикл
+                print(f"Source {source.profile_username} failed: {e}")
+                await self.db_session.rollback()
+                continue
             await self.source_service.update_last_checked_at(source.id)
             total_saved += saved_count
             print(f"Saved {saved_count} raw posts for source {source.profile_username}.")
