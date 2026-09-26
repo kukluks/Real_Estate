@@ -28,7 +28,7 @@ class TelegramNotifier:
         profile_username: str,
         post_url: str,
         caption: str | None,
-        thumbnail_path: str | None,
+        media_paths: str | None,
     ) -> None:
         if not self.enabled:
             return
@@ -39,15 +39,25 @@ class TelegramNotifier:
             "caption": caption or "",
         }
 
+        # media_paths — все файлы карусели/видео, скачанные парсером, а не только одна превью-картинка
+        paths = [p for p in (media_paths or "").split("\n") if p and Path(p).exists()]
+
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                path = Path(thumbnail_path) if thumbnail_path else None
-                if path is not None and path.exists():
-                    with path.open("rb") as file:
-                        files = {"photo": (path.name, file, "image/jpeg")}
+            if paths:
+                open_files = [Path(p).open("rb") for p in paths]
+                try:
+                    files = [
+                        ("media", (Path(p).name, f, "application/octet-stream"))
+                        for p, f in zip(paths, open_files)
+                    ]
+                    async with httpx.AsyncClient(timeout=90.0) as client:
                         response = await client.post(self._url, data=data, files=files)
-                else:
+                finally:
+                    for f in open_files:
+                        f.close()
+            else:
+                async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.post(self._url, data=data)
-                response.raise_for_status()
+            response.raise_for_status()
         except Exception as e:
             print(f"Notify service call failed for {post_url}: {e}")

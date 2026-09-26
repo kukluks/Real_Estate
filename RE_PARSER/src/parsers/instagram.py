@@ -251,10 +251,19 @@ class InstagramPropertyParser(BasePropertyParser):
 
         page = await client.new_page()
         captured: list[Response] = []
+        captured_media_urls: list[str] = []
 
         def on_response(response: Response) -> None:
-            if "graphql" in response.url or "/api/v1/" in response.url:
+            url = response.url
+            if "graphql" in url or "/api/v1/" in url:
                 captured.append(response)
+                return
+            # Запасной источник видео на случай, если во встроенном JSON его не найдём:
+            # у части Reels нет прогрессивного video_versions, только DASH-манифест,
+            # но фактический байтовый запрос видео браузер всё равно делает сам.
+            content_type = response.headers.get("content-type", "")
+            if content_type.startswith("video/") or url.split("?")[0].endswith(".mp4"):
+                captured_media_urls.append(url)
 
         # ВАЖНО: слушатель вешаем ДО goto, иначе все ответы уже пройдут мимо
         page.on("response", on_response)
@@ -266,13 +275,31 @@ class InstagramPropertyParser(BasePropertyParser):
                 await page.wait_for_selector("article, video", timeout=4_000)
             except PlaywrightError:
                 pass  # без логина DOM часто пустой, данные всё равно лежат во встроенном JSON
-            await page.wait_for_timeout(2_000)  # даём догрузиться XHR (было asyncio.sleep(3000) = 50 минут)
+
+            try:
+                # Форсируем проигрывание — иначе браузер может не начать реальный запрос
+                # байтов видео, и мы не увидим его в сетевых ответах вообще.
+                await page.evaluate(
+                    "document.querySelectorAll('video').forEach(v => "
+                    "{ v.muted = true; v.play().catch(() => {}); })"
+                )
+            except PlaywrightError:
+                pass
+
+            await page.wait_for_timeout(2_500)  # даём догрузиться XHR и реальным байтам видео
 
             payloads = await self._collect_payloads(page, captured)
             post_node = self._pick_post_node(payloads, external_id)
 
             media_urls = self._media_from_node(post_node) if post_node else []
+            if not media_urls and captured_media_urls:
+                media_urls = list(dict.fromkeys(captured_media_urls))
             if not media_urls:
+                if post_node is not None:
+                    # Пост нашёлся, но в нём нет ни video_versions, ни image_versions2/candidates —
+                    # структура JSON у Instagram снова поменялась. Ключи в логе помогут поправить
+                    # _best_media_url точно, а не гадая вслепую.
+                    print(f"Post node found for {external_id} but no media in it. Keys: {list(post_node.keys())}")
                 print(f"API/JSON gave no media for {external_id}, falling back to DOM")
                 media_urls = await self._extract_media_from_dom(page)
 
@@ -335,9 +362,13 @@ class InstagramPropertyParser(BasePropertyParser):
         return payloads
 
     def _find_post_nodes(self, data: Any, external_id: str) -> Iterator[dict]:
-        """Ищем во вложенном JSON узел именно нашего поста (по shortcode), а не соседние посты."""
+        """Ищем во вложенном JSON узел именно нашего поста (по shortcode/code), а не соседние посты."""
         if isinstance(data, dict):
-            if data.get("code") == external_id and any(
+            # Instagram в разных ответах называет идентификатор то "code", то "shortcode" —
+            # раньше проверялся только "code", из-за чего Reels иногда вообще не находились
+            # и всё падало в DOM-фолбэк (там только постер-картинка, видео недоступно).
+            identifier = data.get("code") or data.get("shortcode")
+            if identifier == external_id and any(
                 key in data for key in ("image_versions2", "video_versions", "carousel_media")
             ):
                 yield data
