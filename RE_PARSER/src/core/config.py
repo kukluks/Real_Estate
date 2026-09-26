@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     INSTAGRAM_SCROLL_COUNT: int = 3
     INSTAGRAM_LOGIN_REQUIRED: bool = False
     INSTAGRAM_SAVE_SESSION: bool = False
-    MONITOR_INTERVAL_SECONDS: int = 300
+
+    # Адрес отдельного сервиса RE_TELEGRAM, например http://re_telegram:8002/notify.
+    # Не задан — уведомления просто не шлются, парсинг работает как обычно.
+    TELEGRAM_NOTIFY_URL: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=f".env.{os.getenv('MODE', 'dev')}",
@@ -45,6 +48,7 @@ class Settings(BaseSettings):
             "INSTAGRAM_USERNAME",
             "INSTAGRAM_PASSWORD",
             "INSTAGRAM_SESSION_STATE_PATH",
+            "TELEGRAM_NOTIFY_URL",
         ]:
             if data.get(key) == "":
                 data[key] = None

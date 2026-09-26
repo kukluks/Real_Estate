@@ -1,0 +1,20 @@
+services:
+  telegram:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: re_telegram
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    ports:
+      - "8002:8002"
+    volumes:
+      - .:/app
+    networks:
+      - default
+      - re_shared
+
+networks:
+  re_shared:
+    external: true

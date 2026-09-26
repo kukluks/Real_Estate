@@ -5,7 +5,7 @@ from src.schemas.property import PropertyAddSchema
 
 
 class PropertyService:
-    def __init__(self, db_session: AsyncSession):
+    def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
         self.repository = PropertyRepository(db_session)
 
