@@ -21,16 +21,6 @@ class PropertyService:
         self.ai_client = AIClient()
         self.property_api_client = PropertyApiClient()
 
-    async def collect_properties(self, profile_username: str) -> list[RawPostAddSchema]:
-        # known_ids вместо since: парсер не открывает страницы уже сохранённых постов вообще —
-        # а значит, всё, что он вернул, гарантированно новое.
-        known_ids = await self.raw_post_service.get_known_external_ids(profile_username)
-        # execute() выше молча открыл транзакцию (autobegin). Закрываем её ЗДЕСЬ, до начала
-        # долгого Playwright-парсинга — иначе транзакция висит открытой минуты подряд, соединение
-        # в пуле может протухнуть, и следующий DB-вызов падает с непонятной ошибкой SQLAlchemy.
-        await self.db_session.commit()
-        return await self.parser.parse(profile_username, known_external_ids=known_ids)
-
     @staticmethod
     def _build_structured_text(extraction: dict, raw_caption: str | None) -> str:
         lines: list[str] = []
@@ -118,20 +108,33 @@ class PropertyService:
             media_paths=post.media_paths,
         )
 
-    async def _notify_new_posts(self, raw_posts: list[RawPostAddSchema]) -> None:
-        for post in raw_posts:
+    async def _collect_and_process(self, profile_username: str) -> int:
+        """
+        Обрабатывает посты по одному сразу по мере парсинга (сохранение в БД + ИИ + RE_API2 +
+        Telegram), а не собирает все посты профиля в список и не обрабатывает их пачкой в конце.
+        Иначе вызовы к RE_AI шли бы почти одновременно и упирались в rate limit бесплатного тира.
+        """
+        known_ids = await self.raw_post_service.get_known_external_ids(profile_username)
+        # execute() выше молча открыл транзакцию (autobegin). Закрываем её ЗДЕСЬ, до начала
+        # долгого Playwright-парсинга — иначе транзакция висит открытой минуты подряд, соединение
+        # в пуле может протухнуть, и следующий DB-вызов падает с непонятной ошибкой SQLAlchemy.
+        await self.db_session.commit()
+
+        saved_count = 0
+        async for post in self.parser.parse_iter(profile_username, known_external_ids=known_ids):
+            await self.raw_post_service.add_raw_post(post)
+            saved_count += 1
             await self._process_new_post(post)
+
+        return saved_count
 
     async def parse_one(self, profile_username: str) -> int:
         """Разовый парсинг по запросу — используется эндпоинтом POST /parse."""
-        raw_posts = await self.collect_properties(profile_username)
-        saved_count = await self.raw_post_service.save_raw_posts(raw_posts)
-        await self._notify_new_posts(raw_posts)
-        return saved_count
+        return await self._collect_and_process(profile_username)
 
     async def process_sources(self) -> None:
         sources = await self.source_service.get_active_sources()
-        await self.db_session.commit()  # см. комментарий в collect_properties
+        await self.db_session.commit()  # см. комментарий в _collect_and_process
         if not sources:
             print("No active sources found.")
             return
@@ -140,8 +143,7 @@ class PropertyService:
         for source in sources:
             print(f"Processing source: {source.profile_username}")
             try:
-                raw_posts = await self.collect_properties(source.profile_username)
-                saved_count = await self.raw_post_service.save_raw_posts(raw_posts)
+                saved_count = await self._collect_and_process(source.profile_username)
             except Exception as e:
                 # Один упавший источник (login wall, бан, таймаут) не должен ронять весь цикл
                 print(f"Source {source.profile_username} failed: {e}")
@@ -151,7 +153,6 @@ class PropertyService:
                     print(f"Rollback also failed, session is likely dead: {rollback_error}")
                 continue
 
-            await self._notify_new_posts(raw_posts)
             await self.source_service.update_last_checked_at(source.id)
             total_saved += saved_count
             print(f"Saved {saved_count} raw posts for source {source.profile_username}.")

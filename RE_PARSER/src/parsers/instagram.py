@@ -4,7 +4,7 @@ import random
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, AsyncIterator, Iterator
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -29,18 +29,16 @@ class InstagramPropertyParser(BasePropertyParser):
     # ------------------------------------------------------------------ #
     # Главный сценарий
     # ------------------------------------------------------------------ #
-    async def parse(
+    async def parse_iter(
         self,
         profile_username: str,
-        since: datetime | None = None,
         known_external_ids: set[str] | None = None,
-    ) -> list[RawPostAddSchema]:
+    ) -> AsyncIterator[RawPostAddSchema]:
         """
-        Возвращает только НОВЫЕ посты профиля.
-
-        known_external_ids — shortcode'ы постов, которые уже есть в БД: их страницы мы вообще не открываем
-        и медиа не качаем. Это надёжнее фильтра по дате: не зависит от закреплённых постов и от неудачных прогонов.
-        Параметр since оставлен ради совместимости интерфейса и здесь не используется.
+        То же самое, что parse(), но отдаёт посты по одному сразу после парсинга, а не пачкой
+        в конце. Это даёт вызывающему коду (PropertyService) обработать (ИИ + сохранение +
+        Telegram) каждый пост сразу — тогда пауза между постами естественно размазывает по
+        времени и внешние вызовы (например, к RE_AI), а не только сам скрапинг.
         """
         self._validate_settings()
         profile_url = self._build_profile_url(profile_username)
@@ -60,7 +58,7 @@ class InstagramPropertyParser(BasePropertyParser):
             new_links = [url for url in post_links if self._extract_external_id(url) not in known]
             print(f"Profile {profile_username}: {len(post_links)} posts in feed, {len(new_links)} new.")
 
-            raw_posts: list[RawPostAddSchema] = []
+            parsed_count = 0
             for post_url in new_links:
                 try:
                     raw_post = await self._parse_post(client, profile_username, post_url)
@@ -71,11 +69,23 @@ class InstagramPropertyParser(BasePropertyParser):
                 if raw_post is None:
                     continue
 
-                raw_posts.append(raw_post)
+                parsed_count += 1
+                yield raw_post
                 await asyncio.sleep(random.uniform(2, 5))  # небольшая пауза, чтобы не ловить бан
 
-            print(f"Parsed {len(raw_posts)} posts from profile {profile_username}.")
-            return raw_posts
+            print(f"Parsed {parsed_count} posts from profile {profile_username}.")
+
+    async def parse(
+        self,
+        profile_username: str,
+        since: datetime | None = None,
+        known_external_ids: set[str] | None = None,
+    ) -> list[RawPostAddSchema]:
+        """
+        Совместимость со старым интерфейсом: собирает parse_iter в список. since не используется —
+        известные посты фильтруются через known_external_ids до открытия их страниц вообще.
+        """
+        return [post async for post in self.parse_iter(profile_username, known_external_ids)]
 
     # ------------------------------------------------------------------ #
     # Настройки и URL
