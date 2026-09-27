@@ -2,6 +2,8 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.clients.ai import AIClient
+from src.clients.property_api import PropertyApiClient
 from src.clients.telegram import TelegramNotifier
 from src.parsers.registry import get_parser
 from src.schemas.raw_post import RawPostAddSchema
@@ -16,10 +18,12 @@ class PropertyService:
         self.raw_post_service = RawPostService(db_session)
         self.source_service = SourceService(db_session)
         self.notifier = TelegramNotifier()
+        self.ai_client = AIClient()
+        self.property_api_client = PropertyApiClient()
 
     async def collect_properties(self, profile_username: str) -> list[RawPostAddSchema]:
         # known_ids вместо since: парсер не открывает страницы уже сохранённых постов вообще —
-        # а значит, всё, что он вернул, гарантированно новое, и notify можно звать без доп. проверки в БД.
+        # а значит, всё, что он вернул, гарантированно новое.
         known_ids = await self.raw_post_service.get_known_external_ids(profile_username)
         # execute() выше молча открыл транзакцию (autobegin). Закрываем её ЗДЕСЬ, до начала
         # долгого Playwright-парсинга — иначе транзакция висит открытой минуты подряд, соединение
@@ -27,14 +31,96 @@ class PropertyService:
         await self.db_session.commit()
         return await self.parser.parse(profile_username, known_external_ids=known_ids)
 
+    @staticmethod
+    def _build_structured_text(extraction: dict, raw_caption: str | None) -> str:
+        lines: list[str] = []
+
+        price = extraction.get("price")
+        currency_note = extraction.get("currency_note")
+        if price is not None:
+            price_line = f"💰 Цена: {price:g}"
+            if currency_note:
+                price_line += f" ({currency_note})"
+            lines.append(price_line)
+        elif currency_note:
+            lines.append(f"💰 Цена: не указана ({currency_note})")
+
+        lines.append(f"🏠 Тип: {extraction.get('property_type') or 'unknown'}")
+
+        if extraction.get("rooms") is not None:
+            lines.append(f"🛏 Комнат: {extraction['rooms']}")
+        if extraction.get("area_sqm") is not None:
+            lines.append(f"📐 Площадь: {extraction['area_sqm']:g} м²")
+
+        location = extraction.get("city") or "unknown"
+        if extraction.get("district"):
+            location += f", {extraction['district']}"
+        lines.append(f"📍 {location}")
+
+        if extraction.get("contact"):
+            lines.append(f"📞 Контакт: {extraction['contact']}")
+
+        if extraction.get("ai_notes"):
+            lines.append(f"\n🤖 {extraction['ai_notes']}")
+
+        if raw_caption:
+            lines.append(f"\nОригинал: {raw_caption}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_description(extraction: dict, raw_caption: str | None) -> str:
+        parts: list[str] = []
+        if extraction.get("rooms") is not None:
+            parts.append(f"Комнат: {extraction['rooms']}")
+        if extraction.get("area_sqm") is not None:
+            parts.append(f"Площадь: {extraction['area_sqm']} м²")
+        if extraction.get("district"):
+            parts.append(f"Район/адрес: {extraction['district']}")
+        if extraction.get("currency_note"):
+            parts.append(f"Цена: {extraction['currency_note']}")
+        if extraction.get("ai_notes"):
+            parts.append(f"Заметка ИИ: {extraction['ai_notes']}")
+        if raw_caption:
+            parts.append(f"Оригинал: {raw_caption}")
+        return "\n".join(parts)
+
+    async def _process_new_post(self, post: RawPostAddSchema) -> None:
+        extraction = await self.ai_client.extract(
+            caption=post.raw_caption,
+            thumbnail_path=post.thumbnail_path,
+        )
+
+        if extraction is not None:
+            await self.property_api_client.upsert_property(
+                {
+                    "title": extraction.get("title") or post.post_title or "Без названия",
+                    "description": self._build_description(extraction, post.raw_caption),
+                    "price": extraction.get("price"),
+                    "url": str(post.post_url),
+                    "source": post.source,
+                    "city": extraction.get("city") or "unknown",
+                    "property_type": extraction.get("property_type") or "unknown",
+                    "external_id": post.external_id,
+                    "contact": extraction.get("contact"),
+                }
+            )
+            text = self._build_structured_text(extraction, post.raw_caption)
+        else:
+            # ИИ не настроен / упал / не уложился в таймаут — не теряем уведомление,
+            # шлём как раньше, сырой подписью.
+            text = post.raw_caption
+
+        await self.notifier.notify_new_post(
+            profile_username=post.profile_username,
+            post_url=str(post.post_url),
+            caption=text,
+            media_paths=post.media_paths,
+        )
+
     async def _notify_new_posts(self, raw_posts: list[RawPostAddSchema]) -> None:
         for post in raw_posts:
-            await self.notifier.notify_new_post(
-                profile_username=post.profile_username,
-                post_url=str(post.post_url),
-                caption=post.raw_caption,
-                media_paths=post.media_paths,
-            )
+            await self._process_new_post(post)
 
     async def parse_one(self, profile_username: str) -> int:
         """Разовый парсинг по запросу — используется эндпоинтом POST /parse."""

@@ -27,9 +27,14 @@ class Settings(BaseSettings):
     INSTAGRAM_LOGIN_REQUIRED: bool = False
     INSTAGRAM_SAVE_SESSION: bool = False
 
-    # Адрес отдельного сервиса RE_TELEGRAM, например http://re_telegram:8002/notify.
-    # Не задан — уведомления просто не шлются, парсинг работает как обычно.
+    # Адрес RE_TELEGRAM, например http://re_telegram:8002/notify.
     TELEGRAM_NOTIFY_URL: str | None = None
+    # Адрес RE_AI, например http://re_ai:8003/extract. Не задан — ИИ-разбор пропускается,
+    # в Telegram уходит сырая подпись как раньше.
+    AI_EXTRACT_URL: str | None = None
+    # Адрес RE_API2, например http://re_api_app:8000/properties/. Не задан — сохранение
+    # структурированного объявления пропускается.
+    PROPERTY_API_URL: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=f".env.{os.getenv('MODE', 'dev')}",
@@ -49,6 +54,8 @@ class Settings(BaseSettings):
             "INSTAGRAM_PASSWORD",
             "INSTAGRAM_SESSION_STATE_PATH",
             "TELEGRAM_NOTIFY_URL",
+            "AI_EXTRACT_URL",
+            "PROPERTY_API_URL",
         ]:
             if data.get(key) == "":
                 data[key] = None
