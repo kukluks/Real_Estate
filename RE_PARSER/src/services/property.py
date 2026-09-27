@@ -75,13 +75,26 @@ class PropertyService:
             parts.append(f"Оригинал: {raw_caption}")
         return "\n".join(parts)
 
-    async def _process_new_post(self, post: RawPostAddSchema) -> None:
+    async def _process_new_post(
+        self,
+        post: RawPostAddSchema,
+        *,
+        target_chat_id: str | None = None,
+    ) -> None:
         extraction = await self.ai_client.extract(
             caption=post.raw_caption,
             thumbnail_path=post.thumbnail_path,
         )
 
         if extraction is not None:
+            is_re = extraction.get("is_real_estate", True)
+            if not is_re:
+                print(
+                    f"Skip non-real-estate post {post.external_id} "
+                    f"(@{post.profile_username})"
+                )
+                return
+
             await self.property_api_client.upsert_property(
                 {
                     "title": extraction.get("title") or post.post_title or "Без названия",
@@ -106,9 +119,15 @@ class PropertyService:
             post_url=str(post.post_url),
             caption=text,
             media_paths=post.media_paths,
+            target_chat_id=target_chat_id,
         )
 
-    async def _collect_and_process(self, profile_username: str) -> int:
+    async def _collect_and_process(
+        self,
+        profile_username: str,
+        *,
+        target_chat_id: str | None = None,
+    ) -> int:
         """
         Обрабатывает посты по одному сразу по мере парсинга (сохранение в БД + ИИ + RE_API2 +
         Telegram), а не собирает все посты профиля в список и не обрабатывает их пачкой в конце.
@@ -124,7 +143,7 @@ class PropertyService:
         async for post in self.parser.parse_iter(profile_username, known_external_ids=known_ids):
             await self.raw_post_service.add_raw_post(post)
             saved_count += 1
-            await self._process_new_post(post)
+            await self._process_new_post(post, target_chat_id=target_chat_id)
 
         return saved_count
 
@@ -141,9 +160,15 @@ class PropertyService:
 
         total_saved = 0
         for source in sources:
-            print(f"Processing source: {source.profile_username}")
+            print(
+                f"Processing source: {source.profile_username} "
+                f"(owner={source.added_by_chat_id})"
+            )
             try:
-                saved_count = await self._collect_and_process(source.profile_username)
+                saved_count = await self._collect_and_process(
+                    source.profile_username,
+                    target_chat_id=source.added_by_chat_id,
+                )
             except Exception as e:
                 # Один упавший источник (login wall, бан, таймаут) не должен ронять весь цикл
                 print(f"Source {source.profile_username} failed: {e}")

@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir \
     sqlalchemy==2.0.25 \
     asyncpg==0.29.0 \
     pydantic==2.5.3 \
-    pydantic-settings==2.1.0
+    pydantic-settings==2.1.0 \
+    alembic==1.14.0
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8001"]

@@ -46,10 +46,22 @@ class TelegramClient:
         self._token = settings.TELEGRAM_BOT_TOKEN
         self._recipients = RecipientStore(str(settings.TELEGRAM_CHAT_ID))
 
-    async def _broadcast(self, send_one: Callable[[str], Awaitable[None]]) -> None:
-        """Шлёт всем одобренным получателям; один недоступный получатель (заблокировал бота
-        и т.п.) не должен мешать остальным получить уведомление."""
-        for chat_id in self._recipients.all_recipients():
+    def _recipients_for(self, target_chat_id: str | None) -> list[str]:
+        if target_chat_id:
+            # Адресная доставка: только владелец источника (если он ещё approved / админ).
+            if self._recipients.is_approved(target_chat_id):
+                return [target_chat_id]
+            print(f"target_chat_id={target_chat_id} is not approved, skip notify")
+            return []
+        return self._recipients.all_recipients()
+
+    async def _broadcast(
+        self,
+        send_one: Callable[[str], Awaitable[None]],
+        target_chat_id: str | None = None,
+    ) -> None:
+        """Шлёт получателям; один недоступный (заблокировал бота и т.п.) не мешает остальным."""
+        for chat_id in self._recipients_for(target_chat_id):
             try:
                 await send_one(chat_id)
             except Exception as e:
@@ -94,12 +106,21 @@ class TelegramClient:
             response.raise_for_status()
 
     # ------------------------------------------------------------------ #
-    # Рассылка всем одобренным получателям — уведомления о новых постах.
+    # Рассылка: либо всем approved, либо только target_chat_id.
     # ------------------------------------------------------------------ #
-    async def send_text(self, text: str) -> None:
-        await self._broadcast(lambda chat_id: self.send_text_to(chat_id, text))
+    async def send_text(self, text: str, target_chat_id: str | None = None) -> None:
+        await self._broadcast(
+            lambda chat_id: self.send_text_to(chat_id, text),
+            target_chat_id=target_chat_id,
+        )
 
-    async def send_photo(self, filename: str, content: bytes, caption: str) -> None:
+    async def send_photo(
+        self,
+        filename: str,
+        content: bytes,
+        caption: str,
+        target_chat_id: str | None = None,
+    ) -> None:
         async def _send(chat_id: str) -> None:
             url = f"{TELEGRAM_API_URL}/bot{self._token}/sendPhoto"
             data = {"chat_id": chat_id, "caption": caption[:CAPTION_LIMIT]}
@@ -108,9 +129,15 @@ class TelegramClient:
                 response = await client.post(url, data=data, files=files)
                 response.raise_for_status()
 
-        await self._broadcast(_send)
+        await self._broadcast(_send, target_chat_id=target_chat_id)
 
-    async def send_video(self, filename: str, content: bytes, caption: str) -> None:
+    async def send_video(
+        self,
+        filename: str,
+        content: bytes,
+        caption: str,
+        target_chat_id: str | None = None,
+    ) -> None:
         async def _send(chat_id: str) -> None:
             url = f"{TELEGRAM_API_URL}/bot{self._token}/sendVideo"
             data = {"chat_id": chat_id, "caption": caption[:CAPTION_LIMIT]}
@@ -119,9 +146,14 @@ class TelegramClient:
                 response = await client.post(url, data=data, files=files)
                 response.raise_for_status()
 
-        await self._broadcast(_send)
+        await self._broadcast(_send, target_chat_id=target_chat_id)
 
-    async def send_media_group(self, files: list[tuple[str, bytes]], caption: str) -> None:
+    async def send_media_group(
+        self,
+        files: list[tuple[str, bytes]],
+        caption: str,
+        target_chat_id: str | None = None,
+    ) -> None:
         """files — список (filename, content). Фото и видео можно мешать в одном альбоме."""
 
         async def _send(chat_id: str) -> None:
@@ -147,4 +179,4 @@ class TelegramClient:
                     response = await client.post(url, data=data, files=multipart_files)
                     response.raise_for_status()
 
-        await self._broadcast(_send)
+        await self._broadcast(_send, target_chat_id=target_chat_id)

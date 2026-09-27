@@ -4,11 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy.exc import OperationalError
 
 from src.core.config import settings
-from src.db.base import Base
-from src.db.session import async_session_maker, engine
+from src.db.session import async_session_maker
 from src.parsers.registry import get_parser
 from src.schemas.raw_post import RawPostResponseSchema
 from src.schemas.source import SourceAddSchema
@@ -16,24 +14,6 @@ from src.services.property import PropertyService
 from src.services.source import SourceService
 
 _monitor_task: asyncio.Task | None = None
-
-
-async def _init_db_with_retries(max_attempts: int = 10, delay_seconds: float = 3.0) -> None:
-    """
-    Healthcheck в docker-compose иногда отвечает "Healthy" на пару секунд раньше, чем Postgres
-    реально готов принимать соединения (особенно после нечистого выключения — идёт WAL-recovery).
-    Раньше падение здесь роняло весь контейнер; теперь просто ждём и пробуем снова.
-    """
-    for attempt in range(1, max_attempts + 1):
-        try:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            return
-        except OperationalError as e:
-            print(f"DB not ready yet (attempt {attempt}/{max_attempts}): {e}")
-            if attempt == max_attempts:
-                raise
-            await asyncio.sleep(delay_seconds)
 
 
 async def _monitor_loop() -> None:
@@ -53,10 +33,7 @@ async def _monitor_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Раньше это было внутри main()/asyncio.run(), которые CMD "uvicorn src.main:app" никогда не вызывал.
-    # lifespan гарантированно отрабатывает при старте, независимо от способа запуска uvicorn.
-    await _init_db_with_retries()
-
+    # Схема БД накатывается через Alembic до старта uvicorn (см. Dockerfile / docker-compose).
     global _monitor_task
     _monitor_task = asyncio.create_task(_monitor_loop())
     try:
@@ -79,6 +56,7 @@ app.add_middleware(
 
 class SourceRequest(BaseModel):
     profile_username: str
+    added_by_chat_id: str | None = None
 
 
 class ParseRequest(BaseModel):
@@ -103,7 +81,12 @@ async def add_source(source: SourceRequest, db=Depends(get_db)):
 
     service = SourceService(db)
     try:
-        result = await service.add_source(SourceAddSchema(profile_username=source.profile_username))
+        result = await service.add_source(
+            SourceAddSchema(
+                profile_username=source.profile_username,
+                added_by_chat_id=source.added_by_chat_id,
+            )
+        )
         return {"status": "success", "source_id": result.id, "message": f"Source {source.profile_username} added"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -2,6 +2,7 @@ from pydantic import BaseModel
 
 
 class ExtractionResult(BaseModel):
+    is_real_estate: bool = True
     title: str
     price: float | None = None
     currency_note: str | None = None  # валюта, торг, обмен и т.п. — то, что не влезает в чистое число

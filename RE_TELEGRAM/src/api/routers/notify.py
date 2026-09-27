@@ -25,6 +25,7 @@ async def notify(
     profile_username: str = Form(...),
     post_url: str = Form(...),
     caption: str | None = Form(None),
+    target_chat_id: str | None = Form(None),
     media: list[UploadFile] = File(default=[]),
 ):
     text = _build_text(profile_username, post_url, caption)
@@ -37,15 +38,15 @@ async def notify(
 
     try:
         if len(files) > 1:
-            await client.send_media_group(files, text)
+            await client.send_media_group(files, text, target_chat_id=target_chat_id)
         elif len(files) == 1:
             filename, content = files[0]
             if is_video(filename):
-                await client.send_video(filename, content, text)
+                await client.send_video(filename, content, text, target_chat_id=target_chat_id)
             else:
-                await client.send_photo(filename, content, text)
+                await client.send_photo(filename, content, text, target_chat_id=target_chat_id)
         else:
-            await client.send_text(text)
+            await client.send_text(text, target_chat_id=target_chat_id)
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=502, detail=f"Telegram API error: {e.response.text}") from e
 

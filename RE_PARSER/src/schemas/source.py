@@ -9,6 +9,7 @@ class SourceAddSchema(BaseModel):
     profile_url: HttpUrl | None = None
     is_active: bool = True
     notes: str | None = None
+    added_by_chat_id: str | None = None
 
 
 class SourceResponseSchema(SourceAddSchema):

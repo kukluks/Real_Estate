@@ -13,6 +13,9 @@ class TelegramNotifier:
 
     Если TELEGRAM_NOTIFY_URL не задан — ничего не делает; недоступный RE_TELEGRAM тоже
     не должен ронять парсинг, поэтому все ошибки тут гасятся и только логируются.
+
+    target_chat_id — владелец источника: уведомление уйдёт только ему.
+    Если None — RE_TELEGRAM шлёт всем approved (обратная совместимость со старыми источниками).
     """
 
     def __init__(self) -> None:
@@ -29,6 +32,7 @@ class TelegramNotifier:
         post_url: str,
         caption: str | None,
         media_paths: str | None,
+        target_chat_id: str | None = None,
     ) -> None:
         if not self.enabled:
             return
@@ -38,6 +42,8 @@ class TelegramNotifier:
             "post_url": post_url,
             "caption": caption or "",
         }
+        if target_chat_id:
+            data["target_chat_id"] = target_chat_id
 
         # media_paths — все файлы карусели/видео, скачанные парсером, а не только одна превью-картинка
         paths = [p for p in (media_paths or "").split("\n") if p and Path(p).exists()]

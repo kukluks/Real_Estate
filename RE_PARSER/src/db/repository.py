@@ -74,7 +74,10 @@ class SourceRepository:
         self.db_session = db_session
 
     async def add_source(self, source_data: SourceAddSchema) -> SourceModel:
-        existing_source = await self.get_source_by_profile_username(source_data.profile_username)
+        existing_source = await self.get_source_by_profile_and_owner(
+            source_data.profile_username,
+            source_data.added_by_chat_id,
+        )
         if existing_source is not None:
             existing_source.source_type = source_data.source_type
             existing_source.profile_url = str(source_data.profile_url) if source_data.profile_url else None
@@ -91,11 +94,22 @@ class SourceRepository:
             profile_url=str(source_data.profile_url) if source_data.profile_url else None,
             is_active=source_data.is_active,
             notes=source_data.notes,
+            added_by_chat_id=source_data.added_by_chat_id,
         )
         self.db_session.add(source)
         await self.db_session.commit()
         await self.db_session.refresh(source)
         return source
+
+    async def get_source_by_profile_and_owner(
+        self, profile_username: str, added_by_chat_id: str | None
+    ) -> SourceModel | None:
+        query = select(SourceModel).where(
+            SourceModel.profile_username == profile_username,
+            SourceModel.added_by_chat_id == added_by_chat_id,
+        )
+        result = await self.db_session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get_source_by_profile_username(self, profile_username: str) -> SourceModel | None:
         query = select(SourceModel).where(SourceModel.profile_username == profile_username)

@@ -157,7 +157,13 @@ class BotCommandListener:
         try:
             # Таймаут большой: RE_PARSER реально открывает страницу профиля в браузере, это не мгновенно.
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(settings.SOURCE_API_URL, json={"profile_username": username})
+                response = await client.post(
+                    settings.SOURCE_API_URL,
+                    json={
+                        "profile_username": username,
+                        "added_by_chat_id": reply_chat_id,
+                    },
+                )
         except Exception as e:
             await self._telegram.send_text_to(reply_chat_id, f"Не удалось связаться с парсером: {e}")
             return
