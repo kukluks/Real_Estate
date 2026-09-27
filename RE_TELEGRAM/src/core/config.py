@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str
     TELEGRAM_CHAT_ID: str
 
+    # Адрес RE_PARSER для команды /add_source, например http://re_parser_api:8001/sources.
+    # Не задан — команда /add_source просто ответит, что не настроена.
+    SOURCE_API_URL: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=f".env.{os.getenv('MODE', 'dev')}",
         env_file_encoding="utf-8",

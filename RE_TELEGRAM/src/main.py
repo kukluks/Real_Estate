@@ -1,9 +1,27 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from src.api.routers.notify import router
+from src.services.bot_commands import BotCommandListener
 
-app = FastAPI()
+_bot_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _bot_task
+    _bot_task = asyncio.create_task(BotCommandListener().run_forever())
+    try:
+        yield
+    finally:
+        if _bot_task:
+            _bot_task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 app.include_router(router)
 
 

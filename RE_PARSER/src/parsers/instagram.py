@@ -182,6 +182,39 @@ class InstagramPropertyParser(BasePropertyParser):
         except PlaywrightError:
             print("No posts found on profile page (закрытый профиль, login wall или изменилась разметка).")
 
+    async def profile_exists(self, profile_username: str) -> bool:
+        """
+        Best-effort проверка перед добавлением источника. Instagram — SPA, HTTP-статус почти
+        всегда 200 даже для несуществующего профиля, поэтому смотрим на содержимое страницы:
+        явный текст "профиль недоступен" — точно нет; заголовок профиля или сетка постов — есть.
+        Полной гарантии на будущее дать не могу, Instagram меняет разметку без предупреждения.
+        При любой неоднозначности считаем, что профиля нет (безопаснее для ручного добавления
+        источника, чем молча завести несуществующий).
+        """
+        profile_url = self._build_profile_url(profile_username)
+        async with PlaywrightClient() as client:
+            page = await client.new_page()
+            try:
+                await self._load_session(page)
+                await page.goto(profile_url, wait_until="domcontentloaded")
+                await self._dismiss_dialogs(page)
+                await page.wait_for_timeout(1_500)
+
+                not_found_patterns = [
+                    "sorry, this page isn't available",
+                    "this page isn't available",
+                    "page not found",
+                ]
+                page_text = (await page.locator("body").inner_text()).lower()
+                if any(pattern in page_text for pattern in not_found_patterns):
+                    return False
+
+                has_profile_header = await page.locator("header section").count() > 0
+                has_posts_grid = await page.locator("a[href*='/p/'], a[href*='/reel/']").count() > 0
+                return has_profile_header or has_posts_grid
+            finally:
+                await page.close()
+
     async def _dismiss_dialogs(self, page: Page) -> None:
         patterns = [
             re.compile("allow all cookies|разрешить все cookie|accept", re.IGNORECASE),
