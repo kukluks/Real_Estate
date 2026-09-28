@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.clients.ai import AIClient
 from src.clients.property_api import PropertyApiClient
 from src.clients.telegram import TelegramNotifier
+from src.core.config import settings
 from src.db.repository import AI_STATUS_PROCESSED, AI_STATUS_SKIPPED, AI_STATUS_UNAVAILABLE
+from src.db.session import async_session_maker
 from src.parsers.registry import get_parser
 from src.schemas.raw_post import RawPostAddSchema
 from src.services.raw_post import RawPostService
@@ -86,8 +89,6 @@ class PropertyService:
         ИИ и RE_API2 — один раз на пост (это не зависит от того, сколько человек следят за
         профилем), а вот уведомление уходит КАЖДОМУ владельцу источника отдельно.
         """
-        # ИИ вызываем один раз на пост, а не по разу на каждого подписчика профиля —
-        # иначе N подписчиков = N вызовов к Groq на один и тот же пост.
         extraction = await self.ai_client.extract(
             caption=post.raw_caption,
             thumbnail_path=post.thumbnail_path,
@@ -97,7 +98,6 @@ class PropertyService:
             if not extraction.get("is_real_estate", True):
                 snippet = " ".join((post.raw_caption or "").split())[:60]
                 print(f"Skip non-real-estate post {post.external_id} (@{post.profile_username}): {snippet!r}")
-                # Помечаем в БД, чтобы отброшенный пост не выглядел как «необработанный» (new).
                 await self.raw_post_service.set_ai_status(post.external_id, AI_STATUS_SKIPPED)
                 return
 
@@ -117,8 +117,6 @@ class PropertyService:
             text = self._build_structured_text(extraction, post.raw_caption)
             await self.raw_post_service.set_ai_status(post.external_id, AI_STATUS_PROCESSED)
         else:
-            # ИИ не настроен / упал / не уложился в таймаут — не теряем уведомление,
-            # шлём как раньше, сырой подписью.
             text = post.raw_caption
             await self.raw_post_service.set_ai_status(post.external_id, AI_STATUS_UNAVAILABLE)
 
@@ -140,17 +138,11 @@ class PropertyService:
         """
         Обрабатывает посты по одному сразу по мере парсинга (сохранение в БД + ИИ + RE_API2 +
         Telegram), а не собирает все посты профиля в список и не обрабатывает их пачкой в конце.
-        Иначе вызовы к RE_AI шли бы почти одновременно и упирались в rate limit бесплатного тира.
-
-        owner_chat_ids — все, кто добавил этот профиль как источник. None вместо списка
-        (ручной POST /parse) = один адресат None, т.е. рассылка всем одобренным, как раньше.
         """
         owners = owner_chat_ids if owner_chat_ids else [None]
 
         known_ids = await self.raw_post_service.get_known_external_ids(profile_username)
-        # execute() выше молча открыл транзакцию (autobegin). Закрываем её ЗДЕСЬ, до начала
-        # долгого Playwright-парсинга — иначе транзакция висит открытой минуты подряд, соединение
-        # в пуле может протухнуть, и следующий DB-вызов падает с непонятной ошибкой SQLAlchemy.
+        # Закрываем транзакцию до долгого Playwright — иначе соединение в пуле может протухнуть.
         await self.db_session.commit()
 
         saved_count = 0
@@ -165,18 +157,49 @@ class PropertyService:
         """Разовый парсинг по запросу — используется эндпоинтом POST /parse."""
         return await self._collect_and_process(profile_username)
 
+    @staticmethod
+    async def _process_profile_job(
+        profile_username: str,
+        owners: list[str | None],
+        source_ids: list[int],
+        semaphore: asyncio.Semaphore,
+    ) -> int:
+        """
+        Один профиль в отдельной DB-сессии под семафором.
+        Своя сессия обязательна: AsyncSession нельзя безопасно делить между concurrent-задачами.
+        """
+        async with semaphore:
+            print(
+                f"Processing profile: {profile_username} "
+                f"(owners={owners}, concurrency_slot acquired)"
+            )
+            async with async_session_maker() as session:
+                service = PropertyService(session)
+                try:
+                    saved_count = await service._collect_and_process(
+                        profile_username,
+                        owner_chat_ids=owners,
+                    )
+                    for source_id in source_ids:
+                        await service.source_service.update_last_checked_at(source_id)
+                    print(f"Saved {saved_count} raw posts for profile {profile_username}.")
+                    return saved_count
+                except Exception as e:
+                    print(f"Profile {profile_username} failed: {e}")
+                    try:
+                        await session.rollback()
+                    except Exception as rollback_error:
+                        print(f"Rollback also failed, session is likely dead: {rollback_error}")
+                    return 0
+
     async def process_sources(self) -> None:
         sources = await self.source_service.get_active_sources()
-        await self.db_session.commit()  # см. комментарий в _collect_and_process
+        await self.db_session.commit()
         if not sources:
             print("No active sources found.")
             return
 
-        # Группируем по профилю. Раньше каждая строка sources обрабатывалась отдельно, а
-        # известные посты ищутся по profile_username глобально — поэтому если один и тот же
-        # профиль добавили двое, первый владелец забирал все новые посты, а второй по тому же
-        # профилю уже не находил "новых" и не получал ничего. Теперь профиль скрапится один
-        # раз, а уведомление уходит всем его владельцам.
+        # Группируем по профилю: один scrape — уведомления всем владельцам.
         owners_by_profile: dict[str, list[str | None]] = {}
         source_ids_by_profile: dict[str, list[int]] = {}
         for source in sources:
@@ -185,25 +208,24 @@ class PropertyService:
                 owners.append(source.added_by_chat_id)
             source_ids_by_profile.setdefault(source.profile_username, []).append(source.id)
 
-        total_saved = 0
-        for profile_username, owners in owners_by_profile.items():
-            print(f"Processing profile: {profile_username} (owners={owners})")
-            try:
-                saved_count = await self._collect_and_process(profile_username, owner_chat_ids=owners)
-            except Exception as e:
-                # Один упавший источник (login wall, бан, таймаут) не должен ронять весь цикл
-                print(f"Profile {profile_username} failed: {e}")
-                try:
-                    await self.db_session.rollback()
-                except Exception as rollback_error:
-                    print(f"Rollback also failed, session is likely dead: {rollback_error}")
-                continue
+        concurrency = max(1, settings.SCRAPE_CONCURRENCY)
+        semaphore = asyncio.Semaphore(concurrency)
+        print(
+            f"Starting scrape cycle: {len(owners_by_profile)} profiles, "
+            f"concurrency={concurrency}"
+        )
 
-            for source_id in source_ids_by_profile[profile_username]:
-                await self.source_service.update_last_checked_at(source_id)
-            total_saved += saved_count
-            print(f"Saved {saved_count} raw posts for profile {profile_username}.")
-
+        tasks = [
+            self._process_profile_job(
+                profile_username,
+                owners,
+                source_ids_by_profile[profile_username],
+                semaphore,
+            )
+            for profile_username, owners in owners_by_profile.items()
+        ]
+        results = await asyncio.gather(*tasks)
+        total_saved = sum(results)
         print(f"Saved {total_saved} raw posts in total.")
 
     async def dump_raw_posts(self) -> None:

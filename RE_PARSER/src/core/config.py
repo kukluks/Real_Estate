@@ -12,7 +12,12 @@ class Settings(BaseSettings):
     BROWSER: Literal["chromium", "firefox", "webkit"] = "chromium"
     TIMEOUT_MS: int = 30_000
     SAFETY_MAX_ITEMS: int = 100
-    MONITOR_INTERVAL_SECONDS: int = 300
+    # Как часто monitor loop стартует новый обход (секунды).
+    # 120 — разумный компромисс: быстрее, чем 300, но не долбит Instagram каждую минуту.
+    MONITOR_INTERVAL_SECONDS: int = 120
+    # Сколько Instagram-профилей парсить одновременно.
+    # 1 = как раньше (последовательно). 2–3 — нормальный старт. Выше 3 — риск бана/RAM.
+    SCRAPE_CONCURRENCY: int = 3
 
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
@@ -29,11 +34,9 @@ class Settings(BaseSettings):
 
     # Адрес RE_TELEGRAM, например http://re_telegram:8002/notify.
     TELEGRAM_NOTIFY_URL: str | None = None
-    # Адрес RE_AI, например http://re_ai:8003/extract. Не задан — ИИ-разбор пропускается,
-    # в Telegram уходит сырая подпись как раньше.
+    # Адрес RE_AI, например http://re_ai:8003/extract.
     AI_EXTRACT_URL: str | None = None
-    # Адрес RE_API2, например http://re_api_app:8000/properties/. Не задан — сохранение
-    # структурированного объявления пропускается.
+    # Адрес RE_API2, например http://re_api_app:8000/properties/.
     PROPERTY_API_URL: str | None = None
 
     model_config = SettingsConfigDict(
