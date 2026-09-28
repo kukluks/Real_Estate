@@ -1,12 +1,17 @@
 import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models.raw_post import RawPostModel
 from src.db.models.source import SourceModel
 from src.schemas.raw_post import RawPostAddSchema
 from src.schemas.source import SourceAddSchema
+
+# Статус посту ставится после решения ИИ, чтобы в БД было видно, что с ним произошло.
+AI_STATUS_PROCESSED = "processed"
+AI_STATUS_SKIPPED = "skipped_not_real_estate"
+AI_STATUS_UNAVAILABLE = "ai_unavailable"
 
 
 class RawPostRepository:
@@ -52,6 +57,13 @@ class RawPostRepository:
         await self.db_session.refresh(raw_post)
         return raw_post
 
+    async def set_ai_status(self, external_id: str, status: str) -> None:
+        post = await self.get_raw_post_by_external_id(external_id)
+        if post is None:
+            return
+        post.ai_status = status
+        await self.db_session.commit()
+
     async def get_raw_post_by_external_id(self, external_id: str) -> RawPostModel | None:
         query = select(RawPostModel).where(RawPostModel.external_id == external_id)
         result = await self.db_session.execute(query)
@@ -65,6 +77,24 @@ class RawPostRepository:
 
     async def get_raw_posts(self) -> list[RawPostModel]:
         query = select(RawPostModel).order_by(RawPostModel.id.desc())
+        result = await self.db_session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_raw_posts_for_owner(self, owner_chat_id: str) -> list[RawPostModel]:
+        """Посты только тех профилей, которые добавил этот пользователь; отброшенные ИИ
+        как «не недвижимость» в пользовательской выдаче не показываем."""
+        followed = select(SourceModel.profile_username).where(
+            SourceModel.added_by_chat_id == owner_chat_id,
+            SourceModel.is_active.is_(True),
+        )
+        query = (
+            select(RawPostModel)
+            .where(
+                RawPostModel.profile_username.in_(followed),
+                RawPostModel.ai_status != AI_STATUS_SKIPPED,
+            )
+            .order_by(RawPostModel.id.desc())
+        )
         result = await self.db_session.execute(query)
         return list(result.scalars().all())
 
@@ -112,9 +142,11 @@ class SourceRepository:
         return result.scalar_one_or_none()
 
     async def get_source_by_profile_username(self, profile_username: str) -> SourceModel | None:
+        # Раньше тут был scalar_one_or_none(): при двух владельцах одного профиля он падал бы
+        # с MultipleResultsFound. Нужен лишь факт «профиль уже отслеживается кем-то».
         query = select(SourceModel).where(SourceModel.profile_username == profile_username)
         result = await self.db_session.execute(query)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def get_active_sources(self) -> list[SourceModel]:
         query = (
@@ -124,6 +156,27 @@ class SourceRepository:
         )
         result = await self.db_session.execute(query)
         return list(result.scalars().all())
+
+    async def list_by_owner(self, owner_chat_id: str) -> list[SourceModel]:
+        query = (
+            select(SourceModel)
+            .where(
+                SourceModel.added_by_chat_id == owner_chat_id,
+                SourceModel.is_active.is_(True),
+            )
+            .order_by(SourceModel.id.asc())
+        )
+        result = await self.db_session.execute(query)
+        return list(result.scalars().all())
+
+    async def delete_sources(self, owner_chat_id: str, profile_username: str | None = None) -> int:
+        """Удаляет источники владельца: один профиль или, если profile_username не задан, все."""
+        stmt = delete(SourceModel).where(SourceModel.added_by_chat_id == owner_chat_id)
+        if profile_username:
+            stmt = stmt.where(SourceModel.profile_username == profile_username)
+        result = await self.db_session.execute(stmt)
+        await self.db_session.commit()
+        return result.rowcount or 0
 
     async def update_last_checked_at(self, source_id: int) -> None:
         source = await self.db_session.get(SourceModel, source_id)

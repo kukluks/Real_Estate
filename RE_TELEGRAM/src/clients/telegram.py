@@ -15,6 +15,8 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".mkv"}
 
 ADMIN_COMMANDS = [
     {"command": "add_source", "description": "Добавить источник Instagram"},
+    {"command": "my_sources", "description": "Мои источники"},
+    {"command": "remove_source", "description": "Удалить мой источник"},
     {"command": "approve", "description": "Одобрить доступ пользователю (chat_id)"},
     {"command": "revoke", "description": "Забрать доступ у пользователя (chat_id)"},
     {"command": "list_users", "description": "Список одобренных получателей"},
@@ -22,6 +24,8 @@ ADMIN_COMMANDS = [
 ]
 VIEWER_COMMANDS = [
     {"command": "add_source", "description": "Добавить источник Instagram"},
+    {"command": "my_sources", "description": "Мои источники"},
+    {"command": "remove_source", "description": "Удалить мой источник"},
     {"command": "help", "description": "Список команд"},
 ]
 
@@ -53,7 +57,9 @@ class TelegramClient:
                 return [target_chat_id]
             print(f"target_chat_id={target_chat_id} is not approved, skip notify")
             return []
-        return self._recipients.all_recipients()
+        # Без адресата (старый источник без владельца, ручной POST /parse) — только админу.
+        # Раньше тут была рассылка ВСЕМ одобренным, что ломало правило «видишь только свои посты».
+        return [self._recipients.admin_chat_id]
 
     async def _broadcast(
         self,

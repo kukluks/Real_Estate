@@ -19,8 +19,14 @@ class RawPostService:
             saved_count += 1
         return saved_count
 
+    async def set_ai_status(self, external_id: str, status: str) -> None:
+        await self.repository.set_ai_status(external_id, status)
+
     async def get_known_external_ids(self, profile_username: str) -> set[str]:
         return await self.repository.get_external_ids_by_profile(profile_username)
 
     async def get_raw_posts(self):
         return await self.repository.get_raw_posts()
+
+    async def get_raw_posts_for_owner(self, owner_chat_id: str):
+        return await self.repository.get_raw_posts_for_owner(owner_chat_id)
